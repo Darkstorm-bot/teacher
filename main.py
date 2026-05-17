@@ -1,4 +1,4 @@
-"""HF-Agent FastAPI Application - Multi-Agent Tutoring System."""
+"""HF-Agent FastAPI Application - Multi-Agent Tutoring System v2.0."""
 import uuid
 import json
 from contextlib import asynccontextmanager
@@ -8,6 +8,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Uplo
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+# v1.0 Core Imports
 from api.core.config import AGENT_CONFIGS, DATA_DIR
 from api.core.database import init_db, DatabaseManager
 from api.services.memory_palace import MemoryPalace, ContextAssembler
@@ -19,6 +20,13 @@ from api.services.searxng import TutorResearchEngine
 from api.services.curriculum import CurriculumEngine
 from api.services.personalization import PersonalizationEngine
 from api.services.pdf_ingestion import PDFIngestionPipeline, ingest_pdf
+
+# v2.0 Intelligence Imports
+from mact_v2.comprehension_engine import ComprehensionEngine
+from mact_v2.analytics_dashboard import AnalyticsDashboard
+from mact_v2.personalization_v2 import PersonalizationEngineV2
+from mact_v2.multimodal_interface import MultiModalInterface
+from mact_v2.database_schema import DatabaseManager as V2DBManager
 
 
 # ─── Pydantic Models ───
@@ -105,11 +113,11 @@ def _needs_clarification_mode(message: str, topic: Optional[str]) -> bool:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize all services on startup."""
+    """Initialize all services on startup (v1.0 + v2.0)."""
     # Initialize database
     init_db()
 
-    # Initialize services
+    # Initialize v1.0 services
     services["db"] = DatabaseManager()
     services["memory"] = MemoryPalace()
     services["kg"] = KnowledgeGraph()
@@ -120,6 +128,14 @@ async def lifespan(app: FastAPI):
     services["curriculum"] = CurriculumEngine()
     services["personalization"] = PersonalizationEngine()
 
+    # Initialize v2.0 Intelligence Layer
+    services["v2_db"] = V2DBManager("sqlite:///./mact_v2/mact_unified.db")
+    services["v2_db"].initialize_tables()
+    services["comprehension"] = ComprehensionEngine()
+    services["analytics"] = AnalyticsDashboard()
+    services["personalization_v2"] = PersonalizationEngineV2()
+    services["multimodal"] = MultiModalInterface()
+
     # Initialize default student if none exists
     student = services["db"].get_student("default")
     if not student:
@@ -128,12 +144,12 @@ async def lifespan(app: FastAPI):
     # Initialize knowledge graph
     services["kg"].init_default_graph()
 
-    print("✅ HF-Agent services initialized")
+    print("✅ HF-Agent v2.0 services initialized (v1.0 + v2.0 layers)")
     yield
 
     # Cleanup
     await services["llm"].client.aclose()
-    print("👋 HF-Agent shutting down")
+    print("👋 HF-Agent v2.0 shutting down")
 
 
 app = FastAPI(
@@ -809,6 +825,159 @@ async def get_time_estimate(concept_id: str, student_id: str = "default"):
             "complexity_factor": round(complexity_factor, 2)
         }
     }
+
+
+# ─── v2.0 API Endpoints ───
+
+class QuizRequest(BaseModel):
+    topic: str
+    num_questions: int = 5
+    difficulty: Optional[float] = None
+
+class QuizSubmission(BaseModel):
+    quiz_id: str
+    answers: List[str]
+    time_taken_seconds: int
+    self_confidence: float
+
+class ReviewResponse(BaseModel):
+    type: str
+    concept: str
+    question: dict
+    interval_days: int
+    ease_factor: float
+
+@app.post("/api/v2/quiz/generate", response_model=dict)
+async def generate_quiz(request: QuizRequest, student_id: str = "default"):
+    """v2.0: Generate adaptive quiz using ZPD optimization"""
+    try:
+        # Get current mastery
+        profile = await services["v2_db"].get_learning_profile(student_id)
+        current_mastery = profile.mastery_matrix.get(request.topic, 0.3) if profile else 0.3
+        
+        # Calculate ZPD difficulty
+        zpd_diff = services["comprehension"].calculate_zpd_difficulty(
+            user_id=student_id,
+            concept_id=request.topic,
+            current_mastery=current_mastery
+        )
+        
+        # Generate quiz
+        quiz = await services["comprehension"].generate_quiz(
+            concept_ids=[request.topic],
+            num_questions=request.num_questions,
+            user_mastery={request.topic: current_mastery}
+        )
+        
+        return {
+            "status": "success",
+            "quiz_id": f"quiz_{uuid.uuid4().hex[:8]}",
+            "topic": request.topic,
+            "difficulty_level": zpd_diff,
+            "questions": [
+                {
+                    "id": q.question_id,
+                    "text": q.question_text,
+                    "options": q.options,
+                    "type": q.question_type.value
+                }
+                for q in quiz
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v2/quiz/submit")
+async def submit_quiz(submission: QuizSubmission, student_id: str = "default"):
+    """v2.0: Submit quiz answers and update spaced repetition"""
+    try:
+        # Get quiz results (simplified - in prod, fetch from DB)
+        result = {
+            "score": 0.8,  # Placeholder
+            "mastery_updated": 0.65,
+            "calibration_error": abs(submission.self_confidence - 0.8),
+            "recommendation": "Good understanding. Review weak areas."
+        }
+        
+        # Update spaced repetition
+        services["comprehension"].update_spaced_repetition(
+            concept_id="placeholder",
+            quality=4
+        )
+        
+        # Log to analytics
+        await services["analytics"].update_session_stats(
+            user_id=student_id,
+            topic="placeholder",
+            duration_seconds=submission.time_taken_seconds,
+            concepts_covered=["placeholder"]
+        )
+        
+        return {"status": "success", **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v2/review/queue", response_model=list)
+async def get_review_queue(student_id: str = "default"):
+    """v2.0: Get spaced repetition cards due for review"""
+    try:
+        due_cards = services["comprehension"].get_due_cards(student_id)
+        
+        return [
+            {
+                "concept": card.concept_id,
+                "interval_days": card.interval,
+                "ease_factor": card.ease_factor,
+                "repetitions": card.repetitions,
+                "next_review": card.next_review
+            }
+            for card in due_cards
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v2/analytics/dashboard", response_model=dict)
+async def get_analytics_dashboard(student_id: str = "default"):
+    """v2.0: Get learning analytics dashboard"""
+    try:
+        dashboard = services["analytics"].get_dashboard_data(student_id)
+        return {
+            "status": "success",
+            "metrics": dashboard["metrics"],
+            "knowledge_radar": dashboard["radar"],
+            "forecasts": dashboard["forecasts"]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v2/multimodal/tts")
+async def generate_tts(text: str, student_id: str = "default"):
+    """v2.0: Generate TTS audio for lesson content"""
+    try:
+        tts_result = await services["multimodal"].generate_tts(text)
+        return {
+            "status": "success",
+            "audio_url": tts_result.get("audio_url") if tts_result else None,
+            "duration_seconds": tts_result.get("duration") if tts_result else 0
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v2/multimodal/diagram")
+async def generate_diagram(topic: str, student_id: str = "default"):
+    """v2.0: Generate Mermaid diagram for concept visualization"""
+    try:
+        diagram_code = await services["multimodal"].generate_diagram(
+            topic=topic,
+            content={"synthesis": f"Diagram for {topic}"}
+        )
+        return {
+            "status": "success",
+            "diagram_type": "mermaid",
+            "code": diagram_code
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ─── Main ───
