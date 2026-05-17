@@ -18,6 +18,7 @@ from api.services.llm import LLMClient
 from api.services.searxng import TutorResearchEngine
 from api.services.curriculum import CurriculumEngine
 from api.services.personalization import PersonalizationEngine
+from api.services.pdf_ingestion import PDFIngestionPipeline, ingest_pdf
 
 
 # ─── Pydantic Models ───
@@ -59,6 +60,23 @@ class ProgressResponse(BaseModel):
     subject: str
     mastery: list
     stats: dict
+
+
+class PDFUploadResponse(BaseModel):
+    status: str
+    filename: str
+    subject: str
+    level: str
+    concepts_extracted: int
+    dependencies_found: int
+    pages_processed: int
+    stored: bool
+
+
+class ConceptGraphResponse(BaseModel):
+    nodes: list
+    edges: list
+    metadata: dict
 
 
 # ─── Global Services ───
@@ -638,6 +656,159 @@ async def get_session(session_id: str):
 async def get_session_turns(session_id: str):
     """Get all turns for a session."""
     return services["db"].get_recent_turns(session_id, k=1000)
+
+
+# ─── PDF Ingestion Endpoints ───
+
+@app.post("/api/v1/pdf/upload", response_model=PDFUploadResponse)
+async def upload_pdf(
+    file: UploadFile = File(...),
+    subject: str = "matematik",
+    level: str = "C"
+):
+    """
+    Upload a PDF textbook/notes and extract concept graph.
+    
+    The pipeline will:
+    1. Extract text from PDF
+    2. Chunk into semantic sections
+    3. Extract concepts using LLM
+    4. Build dependency graph
+    5. Estimate learning times
+    6. Store in Knowledge Graph + Memory Palace
+    
+    Returns stats about extracted concepts and dependencies.
+    """
+    import tempfile
+    from pathlib import Path
+    
+    # Validate file type
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="File must be a PDF")
+    
+    # Save uploaded file temporarily
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+        content = await file.read()
+        tmp.write(content)
+        tmp_path = tmp.name
+    
+    try:
+        # Process PDF
+        pipeline = PDFIngestionPipeline(services["llm"])
+        result = pipeline.process_pdf(
+            pdf_path=tmp_path,
+            subject=subject,
+            level=level,
+            store_in_graph=True,
+            store_in_memory=True
+        )
+        
+        return PDFUploadResponse(
+            status="success",
+            filename=result["metadata"]["filename"],
+            subject=subject,
+            level=level,
+            concepts_extracted=result["stats"]["concepts_extracted"],
+            dependencies_found=result["stats"]["dependencies_found"],
+            pages_processed=result["stats"]["pages_processed"],
+            stored=result["stored"]
+        )
+    
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ImportError as e:
+        raise HTTPException(status_code=501, detail=str(e) + ". Install with: pip install pymupdf")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
+    finally:
+        # Cleanup temp file
+        try:
+            Path(tmp_path).unlink(missing_ok=True)
+        except:
+            pass
+
+
+@app.get("/api/v1/pdf/concept-graph/{subject}", response_model=ConceptGraphResponse)
+async def get_concept_graph(subject: str, level: str = None):
+    """
+    Get the concept graph extracted from PDFs for a subject.
+    
+    Returns nodes (concepts) and edges (prerequisites/dependencies).
+    """
+    graph = services["kg"].get_graph(subject)
+    return ConceptGraphResponse(
+        nodes=graph["nodes"],
+        edges=graph["edges"],
+        metadata={
+            "subject": subject,
+            "total_concepts": len(graph["nodes"]),
+            "total_dependencies": len(graph["edges"])
+        }
+    )
+
+
+@app.get("/api/v1/pdf/time-estimates/{concept_id}")
+async def get_time_estimate(concept_id: str, student_id: str = "default"):
+    """
+    Get estimated learning time for a concept.
+    
+    Formula: Time = Base_Time × Difficulty × (1 - Mastery)
+    """
+    db = services["db"]
+    kg = services["kg"]
+    
+    # Get concept from graph
+    graph = kg.get_graph()
+    concept = None
+    for node in graph["nodes"]:
+        if node["id"] == concept_id:
+            concept = node
+            break
+    
+    if not concept:
+        raise HTTPException(status_code=404, detail=f"Concept {concept_id} not found")
+    
+    # Get student mastery
+    mastery_data = db.get_mastery(student_id, concept_id)
+    mastery = mastery_data.get("score", 0.0) if mastery_data else 0.0
+    
+    # Calculate time estimate
+    base_times = {
+        "definition": 15,
+        "concept": 30,
+        "procedure": 45,
+        "formula": 40,
+        "theorem": 60,
+        "example": 20
+    }
+    
+    concept_type = concept.get("concept_type", "concept")
+    base_time = base_times.get(concept_type, 30)
+    difficulty = concept.get("difficulty", 0.5)
+    difficulty_multiplier = 0.5 + (difficulty * 1.5)
+    mastery_factor = max(0.1, 1.0 - mastery)
+    
+    # Count prerequisites
+    prereq_count = len([e for e in graph["edges"] 
+                       if e["target_id"] == concept_id and e["relation"] == "prerequisite"])
+    complexity_factor = 1.0 + (prereq_count * 0.1)
+    
+    estimated_time = base_time * difficulty_multiplier * mastery_factor * complexity_factor
+    
+    return {
+        "concept_id": concept_id,
+        "concept_name": concept.get("display_name"),
+        "estimated_minutes": round(estimated_time, 1),
+        "base_time": base_time,
+        "difficulty": difficulty,
+        "mastery": mastery,
+        "prerequisites_count": prereq_count,
+        "breakdown": {
+            "difficulty_multiplier": round(difficulty_multiplier, 2),
+            "mastery_factor": round(mastery_factor, 2),
+            "complexity_factor": round(complexity_factor, 2)
+        }
+    }
 
 
 # ─── Main ───
