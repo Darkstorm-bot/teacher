@@ -1,6 +1,6 @@
 """
-MACT System Integrator - Main Entry Point
-Connects all 4 layers: Curriculum Engine, Memory Schema, Panel Discussion, and Canvas UI
+MACT System Integrator - Main Entry Point (Phase 2 Complete)
+Connects all layers: Curriculum Engine, Memory Schema, Panel Discussion, Canvas UI, PDF Ingestion, SearXNG Research
 """
 
 import json
@@ -8,18 +8,21 @@ from typing import Dict, Any, Optional
 from curriculum_engine import CurriculumEngine
 from memory_schema import MemorySchema
 from panel_discussion import PanelDiscussion
+from pdf_ingestion_pipeline import PDFIngestionPipeline
+from searxng_integration import SearXNGResearcher, ResearchTrigger
 
 class MACTSystem:
     """
     Multi-Agent Cognitive Tutor - Complete System
     """
     
-    def __init__(self, llm_client, mempalace_client):
+    def __init__(self, llm_client, mempalace_client, searxng_url: str = "http://localhost:8080"):
         """
-        Initialize all 4 layers
+        Initialize all layers including Phase 2 enhancements
         
         :param llm_client: LLM client for generating responses
         :param mempalace_client: MemPalace client for memory operations
+        :param searxng_url: Base URL for SearXNG instance
         """
         # Layer 1: Memory Schema (foundation)
         self.memory = MemorySchema(mempalace_client)
@@ -30,35 +33,51 @@ class MACTSystem:
         # Layer 3: Panel Discussion (uses memory + curriculum)
         self.panel = PanelDiscussion(llm_client, self.memory)
         
-        # Layer 4: Frontend (served separately via HTTP)
+        # Layer 4: PDF Ingestion Pipeline (Phase 2)
+        self.pdf_pipeline = PDFIngestionPipeline(llm_client)
+        
+        # Layer 5: SearXNG Research (Phase 2)
+        self.researcher = SearXNGResearcher(searxng_url)
+        self.research_trigger = ResearchTrigger(self.researcher, confidence_threshold=0.6)
+        
+        # Layer 6: Frontend (served separately via HTTP)
         self.frontend_path = "frontend/index.html"
         
-        print("✅ MACT System Initialized")
+        print("✅ MACT System Initialized (Phase 2 Complete)")
         print("   - Memory Schema: Ready")
         print("   - Curriculum Engine: Ready")
         print("   - Panel Discussion: Ready")
+        print("   - PDF Ingestion: Ready")
+        print("   - SearXNG Research: Ready")
         print("   - Canvas UI: Available at frontend/index.html")
 
-    def learn_topic(self, topic: str, concept_graph: Optional[Dict] = None) -> Dict[str, Any]:
+    def learn_topic(self, topic: str, concept_graph: Optional[Dict] = None, 
+                   use_research: bool = True) -> Dict[str, Any]:
         """
         Main learning flow: User requests to learn a topic
         
         :param topic: Topic name (e.g., "Neural Networks")
         :param concept_graph: Optional pre-extracted concept graph from PDF
+        :param use_research: Enable automatic SearXNG research when needed
         :return: Complete lesson with debate history and final synthesis
         """
         print(f"\n📚 Starting lesson on: {topic}")
         
         # Step 1: Get or generate concept graph
         if not concept_graph:
-            # In production: call PDF ingestion pipeline
-            concept_graph = {
-                "id": topic.lower().replace(" ", "_"),
-                "name": topic,
-                "prerequisites": [],
-                "difficulty": 0.5,
-                "base_time": 60
-            }
+            # Try to get from memory first
+            concept_graph = self.memory.get_concept_graph(topic)
+            
+            if not concept_graph:
+                # Create minimal graph
+                concept_graph = {
+                    "id": topic.lower().replace(" ", "_"),
+                    "name": topic,
+                    "prerequisites": [],
+                    "difficulty": 0.5,
+                    "base_time": 60,
+                    "nodes": {}
+                }
         
         # Step 2: Check user's current state
         mastery = self.memory.get_mastery(concept_graph['id'])
@@ -72,11 +91,38 @@ class MACTSystem:
         print("   🎙️  Starting panel discussion...")
         debate_messages = self.panel.run_debate(topic, concept_graph)
         
-        # Step 4: Synthesize final explanation
+        # Convert to dict for research trigger check
+        agent_outputs_dict = {msg.role: msg for msg in debate_messages}
+        
+        # Step 4: Check if research is needed (NEW - Phase 2)
+        if use_research and self.research_trigger.should_research(
+            agent_outputs_dict, topic, concept_graph
+        ):
+            print("   🔬 Auto-triggering research...")
+            
+            # In production, use actual LLM client passed to constructor
+            research_findings = self.research_trigger.conduct_research(
+                topic, 
+                self.panel.llm,  # Use the same LLM client
+                context=str(debate_messages[-1].content)[:200] if debate_messages else ""
+            )
+            
+            if research_findings['success']:
+                print(f"   ✅ Research complete: {research_findings['sources_count']} sources")
+                
+                # Re-run debate with research context
+                print("   🎙️  Re-running debate with research findings...")
+                debate_messages = self.panel.run_debate(
+                    topic, 
+                    concept_graph,
+                    research_context=research_findings['summary']
+                )
+        
+        # Step 5: Synthesize final explanation
         print("   ✨ Synthesizing final explanation...")
         final_output = self.panel.synthesize_final(debate_messages)
         
-        # Step 5: Update memory (if successful)
+        # Step 6: Update memory (if successful)
         # Assume success if critic confidence > 0.6
         critic_msgs = [m for m in debate_messages if m.role == "Critic"]
         if critic_msgs and critic_msgs[-1].confidence > 0.6:
@@ -89,7 +135,7 @@ class MACTSystem:
             )
             print(f"   💾 Updated mastery to: {new_mastery*100:.0f}%")
         
-        # Step 6: Format output for frontend
+        # Step 7: Format output for frontend
         result = {
             "topic": topic,
             "concept_id": concept_graph['id'],
@@ -115,32 +161,39 @@ class MACTSystem:
         # In production: query full concept graph for dependencies
         return []
 
-    def upload_pdf(self, pdf_path: str) -> Dict[str, Any]:
+    def upload_pdf(self, pdf_path: str, subject: str = "General") -> Dict[str, Any]:
         """
-        Upload and process a textbook/notes PDF
+        Upload and process a textbook/notes PDF (Phase 2 - Full Implementation)
         
         :param pdf_path: Path to PDF file
-        :return: Extracted concept graph
+        :param subject: Subject area (Math, CS, Physics, etc.)
+        :return: Extracted concept graph with learning path
         """
         print(f"\n📄 Processing PDF: {pdf_path}")
+        print(f"   Subject: {subject}")
         
-        # In production: call pdf_ingestion.py pipeline
-        # This is a placeholder
-        concept_graph = {
-            "id": "pdf_topic",
-            "name": "Extracted Topic",
-            "concepts": [],
-            "dependencies": []
+        # Call PDF ingestion pipeline
+        concept_graph = self.pdf_pipeline.process_pdf(pdf_path, subject)
+        
+        # Store in memory
+        self.memory.store_concept_graph(concept_graph)
+        
+        # Get user profile for personalized learning path
+        profile = self.memory.get_style_profile() or {
+            "pace": "medium",
+            "attention_span_mins": 25,
+            "sessions_per_day": 2
         }
         
         # Generate learning path
-        learning_path = self.curriculum.generate_learning_path(
-            "PDF Topic",
-            concept_graph.get('concepts', [])
+        learning_path = self.pdf_pipeline.generate_learning_path(
+            concept_graph, 
+            user_profile=profile
         )
         
-        print(f"   📊 Extracted {len(concept_graph.get('concepts', []))} concepts")
-        print(f"   📅 Generated {len(learning_path)} day learning plan")
+        print(f"   📊 Extracted {len(concept_graph['nodes'])} concepts")
+        print(f"   📅 Generated {learning_path[-1]['day'] if learning_path else 0} day learning plan")
+        print(f"   ⏱️  Total estimated time: {concept_graph.get('total_estimated_time_hours', 0)} hours")
         
         return {
             "concept_graph": concept_graph,

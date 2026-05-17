@@ -161,6 +161,52 @@ class MemorySchema:
         results = self.mp.search({"type": "mastery"})
         return {r['concept_id']: r['score'] for r in results}
 
+    # === CONCEPT GRAPH STORAGE (NEW - Phase 2) ===
+    
+    def store_concept_graph(self, graph: Dict[str, Any]):
+        """Stores extracted concept graph from PDF."""
+        room = self._get_room("concept_graphs")
+        
+        data = {
+            "type": "concept_graph",
+            "graph_id": graph.get('id', 'unknown'),
+            "subject": graph.get('subject', 'General'),
+            "nodes": graph.get('nodes', {}),
+            "total_concepts": graph.get('total_concepts', 0),
+            "root_concepts": graph.get('root_concepts', []),
+            "total_estimated_time_hours": graph.get('total_estimated_time_hours', 0)
+        }
+        
+        # Check if graph already exists
+        existing = self.mp.search({
+            "type": "concept_graph",
+            "graph_id": data['graph_id']
+        })
+        
+        if existing:
+            data['id'] = existing[0]['id']
+            self.mp.update(data['id'], data)
+        else:
+            self.mp.store(data, room=room)
+    
+    def get_concept_graph(self, topic: str) -> Optional[Dict[str, Any]]:
+        """Retrieves concept graph for a topic."""
+        results = self.mp.search({"type": "concept_graph"})
+        
+        # Search for topic in nodes
+        topic_id = topic.lower().replace(' ', '_')
+        for graph in results:
+            if topic_id in graph.get('nodes', {}):
+                return graph
+        
+        # Also try matching by name
+        for graph in results:
+            for node_id, node_data in graph.get('nodes', {}).items():
+                if topic.lower() in node_data.get('name', '').lower():
+                    return graph
+        
+        return None
+
 # Usage Example
 if __name__ == "__main__":
     # Mock MemPalace Client
