@@ -3,355 +3,225 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MACT v2.0 - Adaptive Tutor Dashboard</title>
+    <title>MACT v2.0 - Adaptive Tutor</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
     <style>
-        .agent-message { animation: fadeIn 0.3s ease; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .quiz-card { transition: all 0.2s; }
-        .quiz-card:hover { transform: scale(1.02); }
+        .agent-message { border-left: 4px solid; }
+        .einstein { border-color: #FF6B6B; background: #FFF5F5; }
+        .programmer { border-color: #4ECDC4; background: #F0FFFE; }
+        .teacher { border-color: #FFE66D; background: #FFFDF0; }
+        .critic { border-color: #95E1D3; background: #F0FFF8; }
+        .synthesizer { border-color: #A8D8EA; background: #F0F8FF; }
+        .quiz-card { transition: all 0.3s; }
+        .quiz-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
     </style>
 </head>
-<body class="bg-gray-900 text-white min-h-screen">
-    <!-- Header -->
-    <header class="bg-gray-800 border-b border-gray-700 px-6 py-4">
-        <div class="flex justify-between items-center">
-            <h1 class="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
-                MACT v2.0
-            </h1>
-            <div class="flex gap-4">
-                <button onclick="toggleTTS()" class="px-4 py-2 bg-blue-600 rounded hover:bg-blue-700">🔊 TTS</button>
-                <button onclick="showAnalytics()" class="px-4 py-2 bg-purple-600 rounded hover:bg-purple-700">📊 Analytics</button>
-            </div>
+<body class="bg-gray-50 h-screen flex flex-col">
+    <header class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+        <h1 class="text-xl font-bold text-gray-800">🧠 MACT v2.0</h1>
+        <div class="flex gap-4">
+            <input id="username" placeholder="Username" class="border rounded px-3 py-1 text-sm">
+            <button onclick="login()" class="bg-blue-600 text-white px-4 py-1 rounded text-sm hover:bg-blue-700">Login</button>
         </div>
     </header>
 
-    <div class="flex h-[calc(100vh-73px)]">
-        <!-- Left Panel: Knowledge Graph & Quiz -->
-        <div class="w-1/3 border-r border-gray-700 p-4 overflow-y-auto">
-            <div id="graph-container" class="mb-6">
-                <h2 class="text-lg font-semibold mb-3">Knowledge Graph</h2>
-                <div id="knowledge-graph" class="bg-gray-800 rounded p-4 h-64 flex items-center justify-center">
-                    <p class="text-gray-400">Loading graph...</p>
+    <div class="flex-1 flex overflow-hidden">
+        <div class="w-1/3 border-r bg-white flex flex-col">
+            <div class="flex border-b">
+                <button onclick="showTab('graph')" class="flex-1 px-4 py-2 text-sm font-medium border-b-2 border-blue-500 text-blue-600">Knowledge Graph</button>
+                <button onclick="showTab('analytics')" class="flex-1 px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800">Analytics</button>
+                <button onclick="showTab('review')" class="flex-1 px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800">Review Queue</button>
+            </div>
+
+            <div id="tab-graph" class="flex-1 p-4 overflow-auto">
+                <svg id="knowledge-graph" width="100%" height="400"></svg>
+                <p class="text-xs text-gray-500 mt-2">Nodes light up as you master concepts</p>
+            </div>
+
+            <div id="tab-analytics" class="hidden flex-1 p-4 overflow-auto">
+                <canvas id="progressChart"></canvas>
+                <div class="mt-4 grid grid-cols-2 gap-3">
+                    <div class="bg-blue-50 p-3 rounded">
+                        <p class="text-xs text-gray-600">Study Streak</p>
+                        <p id="streak" class="text-2xl font-bold text-blue-700">0 days</p>
+                    </div>
+                    <div class="bg-green-50 p-3 rounded">
+                        <p class="text-xs text-gray-600">Concepts Mastered</p>
+                        <p id="mastered" class="text-2xl font-bold text-green-700">0</p>
+                    </div>
                 </div>
             </div>
 
-            <div id="quiz-section" class="mb-6">
-                <h2 class="text-lg font-semibold mb-3">Quick Quiz</h2>
-                <button onclick="generateQuiz()" class="w-full py-2 bg-green-600 rounded hover:bg-green-700 mb-3">
-                    Generate Quiz
-                </button>
-                <div id="quiz-container"></div>
-            </div>
-
-            <div id="review-section">
-                <h2 class="text-lg font-semibold mb-3">Spaced Repetition</h2>
-                <button onclick="loadReviewQueue()" class="w-full py-2 bg-yellow-600 rounded hover:bg-yellow-700 mb-3">
-                    Load Review Cards
-                </button>
-                <div id="review-container"></div>
+            <div id="tab-review" class="hidden flex-1 p-4 overflow-auto">
+                <h3 class="font-semibold mb-3">Spaced Repetition Reviews</h3>
+                <div id="review-cards" class="space-y-3"></div>
             </div>
         </div>
 
-        <!-- Right Panel: Agent Chat & Content -->
-        <div class="w-2/3 p-4 flex flex-col">
-            <div id="chat-container" class="flex-1 overflow-y-auto mb-4 space-y-3">
-                <!-- Messages appear here -->
-                <div class="agent-message bg-gray-800 rounded-lg p-4">
-                    <p class="text-blue-400 font-semibold">System</p>
-                    <p>Welcome to MACT v2.0! Start by generating a quiz or loading your review queue.</p>
+        <div class="w-2/3 flex flex-col">
+            <div id="chat-panel" class="flex-1 p-4 overflow-auto space-y-3">
+                <div class="text-center text-gray-400 text-sm mt-10">Start learning! Agents will appear here.</div>
+            </div>
+
+            <div id="quiz-panel" class="hidden flex-1 p-6 overflow-auto">
+                <div class="max-w-2xl mx-auto">
+                    <div class="bg-white rounded-lg shadow-md p-6 quiz-card">
+                        <div class="flex justify-between items-start mb-4">
+                            <span id="quiz-type" class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">MCQ</span>
+                            <span id="quiz-difficulty" class="text-xs text-gray-500">Difficulty: 0.5</span>
+                        </div>
+                        <h3 id="quiz-question" class="text-lg font-semibold mb-4">Question goes here...</h3>
+                        <div id="quiz-options" class="space-y-2 mb-4"></div>
+                        <div class="flex gap-3">
+                            <button onclick="submitQuiz()" class="flex-1 bg-green-600 text-white py-2 rounded hover:bg-green-700">Submit Answer</button>
+                            <button onclick="requestHint()" class="px-4 border border-gray-300 rounded hover:bg-gray-50">💡 Hint</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Input Area -->
-            <div class="flex gap-2">
-                <input 
-                    type="text" 
-                    id="user-input"
-                    placeholder="Ask a question..."
-                    class="flex-1 bg-gray-800 border border-gray-700 rounded px-4 py-2 focus:outline-none focus:border-blue-500"
-                    onkeypress="if(event.key==='Enter') sendMessage()"
-                >
-                <button onclick="sendMessage()" class="px-6 py-2 bg-blue-600 rounded hover:bg-blue-700">Send</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Analytics Modal -->
-    <div id="analytics-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-        <div class="bg-gray-800 rounded-lg p-6 w-3/4 max-h-[80vh] overflow-y-auto">
-            <div class="flex justify-between mb-4">
-                <h2 class="text-xl font-bold">Learning Analytics</h2>
-                <button onclick="closeAnalytics()" class="text-gray-400 hover:text-white">✕</button>
-            </div>
-            <div class="grid grid-cols-2 gap-4">
-                <div class="bg-gray-700 rounded p-4">
-                    <h3 class="font-semibold mb-2">Knowledge Radar</h3>
-                    <canvas id="radar-chart"></canvas>
+            <div class="border-t bg-white p-4">
+                <div class="flex gap-3">
+                    <input id="user-input" placeholder="Ask a question or type 'quiz' to start..." 
+                           class="flex-1 border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                           onkeypress="if(event.key==='Enter') sendMessage()">
+                    <button onclick="sendMessage()" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">Send</button>
+                    <button onclick="toggleTTS()" class="px-4 border rounded hover:bg-gray-50" title="Toggle TTS">🔊</button>
                 </div>
-                <div class="bg-gray-700 rounded p-4">
-                    <h3 class="font-semibold mb-2">Progress Over Time</h3>
-                    <canvas id="progress-chart"></canvas>
-                </div>
-            </div>
-            <div id="forecast-section" class="mt-4 bg-gray-700 rounded p-4">
-                <h3 class="font-semibold mb-2">Mastery Forecast</h3>
-                <div id="forecast-content"></div>
             </div>
         </div>
     </div>
 
     <script>
-        const API_BASE = 'http://localhost:8000';
-        const USER_ID = 1; // Hardcoded for demo
+        let userId = null, token = null, currentQuiz = null, ttsEnabled = false, ws = null;
 
-        // Initialize Mermaid
-        mermaid.initialize({ startOnLoad: false, theme: 'dark' });
-
-        // WebSocket Connection
-        let ws = new WebSocket(`ws://${API_BASE.replace('http://', '')}/ws/${USER_ID}`);
-        ws.onopen = () => addSystemMessage('Connected to server');
-        ws.onmessage = (event) => handleWebSocketMessage(JSON.parse(event.data));
-
-        function handleWebSocketMessage(data) {
-            if (data.type === 'analytics_update') {
-                updateAnalytics(data.data);
-            }
+        async function login() {
+            const username = document.getElementById('username').value;
+            if (!username) return alert('Enter username');
+            const res = await fetch('/auth/login', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: `username=${username}`
+            });
+            const data = await res.json();
+            userId = data.user_id;
+            token = data.access_token;
+            ws = new WebSocket(`ws://localhost:8000/ws/${userId}`);
+            ws.onmessage = (event) => handleWSMessage(JSON.parse(event.data));
+            addSystemMessage(`Welcome back! Ready to learn?`);
+            loadDashboard();
         }
 
-        // Quiz Functions
+        async function sendMessage() {
+            const input = document.getElementById('user-input');
+            const text = input.value.trim();
+            if (!text || !userId) return;
+            addUserMessage(text);
+            input.value = '';
+            if (text.toLowerCase() === 'quiz') { generateQuiz(); return; }
+            setTimeout(() => addAgentMessage('teacher', `Let me break down "${text}" for you...`), 500);
+        }
+
         async function generateQuiz() {
-            try {
-                const response = await fetch(`${API_BASE}/quiz/generate`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_id: USER_ID, concept_id: 1, question_count: 3 })
-                });
-                const data = await response.json();
-                displayQuiz(data.quiz);
-            } catch (error) {
-                addSystemMessage('Error generating quiz: ' + error.message);
-            }
-        }
-
-        function displayQuiz(quiz) {
-            const container = document.getElementById('quiz-container');
-            container.innerHTML = quiz.questions.map((q, i) => `
-                <div class="quiz-card bg-gray-700 rounded p-3 mb-2">
-                    <p class="font-semibold">${i+1}. ${q.question}</p>
-                    <div class="mt-2 space-y-1">
-                        ${q.options.map(opt => `
-                            <label class="block cursor-pointer hover:bg-gray-600 rounded px-2 py-1">
-                                <input type="radio" name="q${q.id}" value="${opt}" class="mr-2">
-                                ${opt}
-                            </label>
-                        `).join('')}
-                    </div>
-                </div>
-            `).join('') + `
-                <button onclick="submitQuiz(${quiz.id})" class="w-full py-2 bg-blue-600 rounded hover:bg-blue-700 mt-2">
-                    Submit Answers
-                </button>
-            `;
-        }
-
-        async function submitQuiz(quizId) {
-            const answers = {};
-            document.querySelectorAll('#quiz-container input[type="radio"]:checked').forEach(input => {
-                const qId = parseInt(input.name.replace('q', ''));
-                answers[qId] = input.value;
+            const res = await fetch('/quiz/generate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({user_id: userId, concept_id: 'intro', difficulty: 0.5})
             });
-
-            try {
-                const response = await fetch(`${API_BASE}/quiz/submit`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ quiz_id: quizId, user_id: USER_ID, answers })
-                });
-                const data = await response.json();
-                addSystemMessage(`Quiz submitted! Score: ${(data.result.score * 100).toFixed(0)}%`);
-            } catch (error) {
-                addSystemMessage('Error submitting quiz: ' + error.message);
-            }
+            currentQuiz = await res.json();
+            showQuiz(currentQuiz);
         }
 
-        // Review Functions
-        async function loadReviewQueue() {
-            try {
-                const response = await fetch(`${API_BASE}/review/queue`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_id: USER_ID, count: 5 })
-                });
-                const data = await response.json();
-                displayReviewCards(data.cards);
-            } catch (error) {
-                addSystemMessage('Error loading reviews: ' + error.message);
-            }
-        }
-
-        function displayReviewCards(cards) {
-            const container = document.getElementById('review-container');
-            if (cards.length === 0) {
-                container.innerHTML = '<p class="text-gray-400">No cards due for review!</p>';
-                return;
-            }
-            container.innerHTML = cards.map((card, i) => `
-                <div class="bg-gray-700 rounded p-3 mb-2">
-                    <p class="font-semibold">${card.question}</p>
-                    <details class="mt-2">
-                        <summary class="cursor-pointer text-blue-400">Show Answer</summary>
-                        <p class="mt-2 text-green-400">${card.answer}</p>
-                        <div class="mt-2 flex gap-2">
-                            {[1,2,3,4,5].map(rating => `
-                                <button onclick="submitReview(${card.id}, ${rating})" 
-                                    class="px-3 py-1 bg-gray-600 rounded hover:bg-green-600 text-sm">
-                                    ${rating}
-                                </button>
-                            `).join('')}
-                        </div>
-                    </details>
-                </div>
-            `).join('');
-        }
-
-        async function submitReview(cardId, rating) {
-            try {
-                await fetch(`${API_BASE}/review/submit?user_id=${USER_ID}&card_id=${cardId}&rating=${rating}`, {
-                    method: 'POST'
-                });
-                addSystemMessage(`Review submitted with rating: ${rating}`);
-                loadReviewQueue(); // Refresh
-            } catch (error) {
-                addSystemMessage('Error submitting review: ' + error.message);
-            }
-        }
-
-        // Analytics Functions
-        async function showAnalytics() {
-            document.getElementById('analytics-modal').classList.remove('hidden');
-            try {
-                const [dashboard, radar] = await Promise.all([
-                    fetch(`${API_BASE}/analytics/dashboard/${USER_ID}`).then(r => r.json()),
-                    fetch(`${API_BASE}/analytics/knowledge-radar/${USER_ID}`).then(r => r.json())
-                ]);
-                
-                renderRadarChart(radar.radar);
-                renderProgressChart(dashboard.data);
-                renderForecast(dashboard.data.forecast);
-            } catch (error) {
-                addSystemMessage('Error loading analytics: ' + error.message);
-            }
-        }
-
-        function closeAnalytics() {
-            document.getElementById('analytics-modal').classList.add('hidden');
-        }
-
-        function renderRadarChart(radarData) {
-            const ctx = document.getElementById('radar-chart').getContext('2d');
-            new Chart(ctx, {
-                type: 'radar',
-                data: {
-                    labels: Object.keys(radarData),
-                    datasets: [{
-                        label: 'Mastery Level',
-                        data: Object.values(radarData),
-                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                        borderColor: 'rgb(59, 130, 246)',
-                        borderWidth: 2
-                    }]
-                },
-                options: { scales: { r: { min: 0, max: 1 } } }
+        function showQuiz(quiz) {
+            document.getElementById('chat-panel').classList.add('hidden');
+            document.getElementById('quiz-panel').classList.remove('hidden');
+            document.getElementById('quiz-type').textContent = quiz.question_type;
+            document.getElementById('quiz-difficulty').textContent = `Difficulty: ${quiz.difficulty}`;
+            document.getElementById('quiz-question').textContent = quiz.question;
+            const optionsDiv = document.getElementById('quiz-options');
+            optionsDiv.innerHTML = '';
+            quiz.options.forEach((opt, i) => {
+                optionsDiv.innerHTML += `<label class="flex items-center p-3 border rounded cursor-pointer hover:bg-gray-50"><input type="radio" name="answer" value="${opt}" class="mr-3">${opt}</label>`;
             });
         }
 
-        function renderProgressChart(dashboardData) {
-            const ctx = document.getElementById('progress-chart').getContext('2d');
+        async function submitQuiz() {
+            const selected = document.querySelector('input[name="answer"]:checked');
+            if (!selected) return alert('Select an answer');
+            const res = await fetch('/quiz/submit', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({quiz_id: currentQuiz.id, user_answer: selected.value, time_taken: 30.0})
+            });
+            const result = await res.json();
+            alert(result.is_correct ? '✅ Correct!' : '❌ Incorrect. Review scheduled.');
+            document.getElementById('quiz-panel').classList.add('hidden');
+            document.getElementById('chat-panel').classList.remove('hidden');
+            loadDashboard();
+        }
+
+        async function loadDashboard() {
+            if (!userId) return;
+            const res = await fetch(`/analytics/dashboard/${userId}`);
+            const data = await res.json();
+            document.getElementById('streak').textContent = `${data.streak} days`;
+            document.getElementById('mastered').textContent = data.concepts_mastered;
+            updateChart(data.progress_data);
+        }
+
+        function addSystemMessage(text) {
+            const panel = document.getElementById('chat-panel');
+            panel.innerHTML += `<div class="text-center text-gray-500 text-sm my-2">${text}</div>`;
+            panel.scrollTop = panel.scrollHeight;
+        }
+
+        function addUserMessage(text) {
+            const panel = document.getElementById('chat-panel');
+            panel.innerHTML += `<div class="flex justify-end"><div class="bg-blue-600 text-white px-4 py-2 rounded-lg max-w-md">${text}</div></div>`;
+            panel.scrollTop = panel.scrollHeight;
+        }
+
+        function addAgentMessage(agent, text) {
+            const panel = document.getElementById('chat-panel');
+            panel.innerHTML += `<div class="agent-message ${agent} px-4 py-3 rounded-r-lg max-w-lg"><p class="text-xs font-semibold uppercase opacity-70 mb-1">${agent}</p><p class="text-sm">${text}</p></div>`;
+            panel.scrollTop = panel.scrollHeight;
+        }
+
+        function showTab(tab) {
+            ['graph', 'analytics', 'review'].forEach(t => {
+                document.getElementById(`tab-${t}`).classList.add('hidden');
+            });
+            document.getElementById(`tab-${tab}`).classList.remove('hidden');
+        }
+
+        function toggleTTS() { ttsEnabled = !ttsEnabled; alert(`TTS ${ttsEnabled ? 'enabled' : 'disabled'}`); }
+        function requestHint() { alert('💡 Hint: Think about the core concept first...'); }
+        function handleWSMessage(msg) { console.log('WS:', msg); }
+
+        function updateChart(data) {
+            const ctx = document.getElementById('progressChart').getContext('2d');
             new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
-                    datasets: [{
-                        label: 'Concepts Mastered',
-                        data: dashboardData.metrics?.concepts_mastered || [0, 0, 0, 0],
-                        borderColor: 'rgb(168, 85, 247)',
-                        tension: 0.4
-                    }]
-                }
+                    labels: data.labels || ['Day 1', 'Day 2', 'Day 3'],
+                    datasets: [{label: 'Mastery Score', data: data.values || [0.3, 0.5, 0.7], borderColor: 'rgb(59, 130, 246)', tension: 0.3}]
+                },
+                options: { responsive: true }
             });
         }
 
-        function renderForecast(forecast) {
-            const container = document.getElementById('forecast-content');
-            container.innerHTML = forecast.map(f => `
-                <div class="flex justify-between py-2 border-b border-gray-600">
-                    <span>${f.concept}</span>
-                    <span class="text-green-400">${f.predicted_date}</span>
-                </div>
-            `).join('');
+        function drawGraph() {
+            const svg = d3.select("#knowledge-graph");
+            const nodes = [{id: "Basics", mastery: 0.8}, {id: "Concepts", mastery: 0.5}, {id: "Advanced", mastery: 0.2}];
+            svg.selectAll("circle").data(nodes).enter().append("circle")
+                .attr("cx", (d, i) => 100 + i * 100).attr("cy", 200).attr("r", 30)
+                .attr("fill", d => d.mastery > 0.7 ? '#22c55e' : d.mastery > 0.4 ? '#eab308' : '#ef4444').attr("opacity", 0.7);
+            svg.selectAll("text").data(nodes).enter().append("text")
+                .attr("x", (d, i) => 100 + i * 100).attr("y", 205).attr("text-anchor", "middle").attr("font-size", "12px").text(d => d.id);
         }
-
-        // Chat Functions
-        function sendMessage() {
-            const input = document.getElementById('user-input');
-            const message = input.value.trim();
-            if (!message) return;
-
-            addMessage('User', message, 'text-right');
-            input.value = '';
-
-            // Simulate agent response (replace with actual API call)
-            setTimeout(() => {
-                addMessage('Teacher', 'Great question! Let me explain...', 'text-left');
-            }, 500);
-        }
-
-        function addMessage(sender, content, align) {
-            const container = document.getElementById('chat-container');
-            const colors = {
-                'User': 'bg-blue-600',
-                'Teacher': 'bg-green-600',
-                'Einstein': 'bg-yellow-600',
-                'Programmer': 'bg-purple-600',
-                'Critic': 'bg-red-600',
-                'System': 'bg-gray-600'
-            };
-            
-            container.innerHTML += `
-                <div class="agent-message ${colors[sender] || 'bg-gray-700'} rounded-lg p-3 max-w-md ${align} ml-auto">
-                    <p class="font-semibold text-sm">${sender}</p>
-                    <p>${content}</p>
-                </div>
-            `;
-            container.scrollTop = container.scrollHeight;
-        }
-
-        function addSystemMessage(msg) {
-            addMessage('System', msg, 'text-left');
-        }
-
-        // TTS Placeholder
-        function toggleTTS() {
-            addSystemMessage('TTS feature ready - integrate Piper/Coqui backend');
-        }
-
-        // Load knowledge graph
-        async function loadKnowledgeGraph() {
-            const container = document.getElementById('knowledge-graph');
-            container.innerHTML = `
-                <div class="text-center">
-                    <p class="text-green-400">● Concepts Learned: 12</p>
-                    <p class="text-yellow-400">● In Progress: 3</p>
-                    <p class="text-gray-400">○ Pending: 8</p>
-                </div>
-            `;
-        }
-
-        // Initialize
-        loadKnowledgeGraph();
+        drawGraph();
     </script>
 </body>
 </html>
