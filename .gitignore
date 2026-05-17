@@ -1,8 +1,24 @@
-```markdown
-# Project-specific ignores
-ROADMAP_V2.md
 ```
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 
-Wait, I need to reconsider this. ROADMAP_V2.md is a source/markdown file that was added, so it should NOT be ignored. Since only a markdown file was added and no build artifacts, dependencies, or temp files are present in the changes, the output should be empty.
+# Logs and temp files
+*.log
+*.tmp
 
-(Empty output)
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# Dependencies
+.venv/
+venv/
+```
