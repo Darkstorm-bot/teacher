@@ -105,12 +105,96 @@ class LearningSession(Base):
 class DatabaseManager:
     def __init__(self, db_url="sqlite:///mact_v2.db"):
         self.engine = create_engine(db_url, echo=False)
+        self.SessionLocal = sessionmaker(bind=self.engine)
+        
+    def initialize_tables(self):
+        """Create all tables if they don't exist"""
         Base.metadata.create_all(self.engine)
-        SessionLocal = sessionmaker(bind=self.engine)
-        self.session = SessionLocal()
-
+        
     def get_session(self):
-        return self.session
+        return self.SessionLocal()
+    
+    # User Operations
+    async def get_user_by_id(self, user_id: str):
+        """Get or create user by string ID (mapped to username)"""
+        session = self.get_session()
+        try:
+            user = session.query(User).filter(User.username == user_id).first()
+            if not user:
+                # Auto-create guest user
+                user = User(username=user_id)
+                session.add(user)
+                session.commit()
+                session.refresh(user)
+            return user
+        finally:
+            session.close()
+    
+    async def create_user(self, username: str, password_hash: str, email: str):
+        """Create new user"""
+        session = self.get_session()
+        try:
+            user = User(username=username)
+            session.add(user)
+            session.commit()
+            
+            # Create default learning profile
+            profile = LearningStyleProfile(user_id=user.id)
+            session.add(profile)
+            session.commit()
+            return user
+        finally:
+            session.close()
+    
+    async def get_learning_profile(self, user_id: str):
+        """Get user's learning style profile"""
+        session = self.get_session()
+        try:
+            user = session.query(User).filter(User.username == user_id).first()
+            if user:
+                return session.query(LearningStyleProfile).filter(
+                    LearningStyleProfile.user_id == user.id
+                ).first()
+            return None
+        finally:
+            session.close()
+    
+    async def log_quiz_session(self, user_id: str, topic: str, quiz_data: list):
+        """Log quiz session"""
+        session = self.get_session()
+        try:
+            user = session.query(User).filter(User.username == user_id).first()
+            if user:
+                result = QuizResult(
+                    user_id=user.id,
+                    concept_id=topic,
+                    score=0.0,  # Will be updated on submission
+                    time_spent_seconds=0,
+                    question_count=len(quiz_data)
+                )
+                session.add(result)
+                session.commit()
+        finally:
+            session.close()
+    
+    async def log_chat_interaction(self, user_id: str, user_message: str, agent_response: str, timestamp=None):
+        """Log chat interaction for analytics"""
+        session = self.get_session()
+        try:
+            user = session.query(User).filter(User.username == user_id).first()
+            if user:
+                # Store in metacognition table as chat log
+                meta = UserMetacognition(
+                    user_id=user.id,
+                    concept_id="chat",
+                    self_confidence=1.0,
+                    actual_score=1.0,
+                    notes=f"User: {user_message[:100]} | Agent: {agent_response[:100]}"
+                )
+                session.add(meta)
+                session.commit()
+        finally:
+            session.close()
 
 # Initialize DB
 db_manager = DatabaseManager()
