@@ -6,45 +6,26 @@ __pycache__/
 # Dependencies
 .venv/
 venv/
-node_modules/
-dist/
-build/
-target/
+.env
+.env.local
+.env.*
 
 # Logs and temp files
 *.log
 *.tmp
 *.swp
 
-# Environment
-.env
-.env.local
-*.env.*
-
 # Editors
 .vscode/
 .idea/
 
-# Coverage
+# Coverage reports
 .coverage
 coverage/
 htmlcov/
 
-# Python specific
-*.pyo
-*.pyd
-.Python
-*.so
+# Distribution artifacts
+dist/
+build/
 *.egg-info/
-.eggs/
-
-# Backup files
-*~
-*.bak
-*.swp
-*.swo
-
-# OS generated files
-.DS_Store
-Thumbs.db
 ```
