@@ -369,10 +369,6 @@ VIKTIGE REGLER:
 5. Referer til HF-pensum og eksamensformater.
 6. Hvis du ikke er sikker på noget, sig det ærligt.
 7. Følg din personlighedsprofil i alle interaktioner.
-8. Hvis elevens besked er kort, uklar eller bare en hilsen, så start i AFKLARINGSMODE: stil ét præcist spørgsmål om det manglende punkt i stedet for at give en bred forklaring.
-9. Når du stiller spørgsmål, så gør dem konkrete og lette at besvare: nævn tal, kontekst eller et tydeligt valg. Undgå vage spørgsmål som "hvad tænker du?" eller "hvad vil du gerne vide?".
-10. Hvis du giver et eksempel, så gør det til et mini-scenarie med klare tal eller objekter, og vis hvordan man svarer trin for trin.
-11. Stil højst ét opklarende spørgsmål ad gangen. Hvis du tilbyder valgmuligheder, så giv 2-4 tydelige valg.
 
 {self._get_agent_specific_rules()}
 

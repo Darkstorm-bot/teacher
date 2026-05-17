@@ -1,16 +1,8 @@
 import { Link, useLocation } from "react-router";
 import { useState, useEffect } from "react";
 import {
-  MessageSquare,
-  BarChart3,
-  GitFork,
-  BookOpen,
-  Settings,
-  Brain,
-  Menu,
-  X,
-  ChevronRight,
-  CircleDot,
+  MessageSquare, BarChart3, GitFork, BookOpen, Settings, Brain,
+  Menu, X, ChevronRight, CircleDot,
 } from "lucide-react";
 import { api } from "@/services/api";
 
@@ -72,7 +64,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <button
             className="ml-auto lg:hidden p-1 rounded-md hover:bg-accent"
             onClick={() => setSidebarOpen(false)}
-            title="Close sidebar"
           >
             <X className="w-4 h-4" />
           </button>
@@ -116,7 +107,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <button
             onClick={() => setSidebarOpen(true)}
             className="p-2 rounded-lg hover:bg-accent"
-            title="Open sidebar"
           >
             <Menu className="w-5 h-5" />
           </button>

@@ -45,16 +45,6 @@ class StudentCreate(BaseModel):
     target_program: str = "BSc AI / Software Engineering"
 
 
-class StudentUpdate(BaseModel):
-    name: Optional[str] = None
-    hf_year: Optional[int] = None
-    target_program: Optional[str] = None
-    preferred_modality: Optional[str] = None
-    preferred_depth: Optional[str] = None
-    preferred_language: Optional[str] = None
-    pace: Optional[float] = None
-
-
 class ProgressResponse(BaseModel):
     subject: str
     mastery: list
@@ -64,26 +54,6 @@ class ProgressResponse(BaseModel):
 # ─── Global Services ───
 
 services = {}
-
-
-def _needs_clarification_mode(message: str, topic: Optional[str]) -> bool:
-    """Detect greetings / terse or generic messages that should trigger a concrete clarifying question."""
-    msg = (message or "").strip().lower()
-    if not msg:
-        return True
-
-    greeting_signals = {"hej", "hello", "hi", "hey", "godmorgen", "god dag", "good morning", "good day"}
-    if msg in greeting_signals:
-        return True
-
-    if len(msg.split()) <= 3:
-        return True
-
-    generic_signals = {"general", "hjælp", "help", "spørgsmål", "question"}
-    if topic in {None, "general"} and any(signal in msg for signal in generic_signals):
-        return True
-
-    return False
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -141,6 +111,7 @@ class ConnectionManager:
         self.active_connections: dict[str, WebSocket] = {}
 
     async def connect(self, websocket: WebSocket, session_id: str):
+        await websocket.accept()
         self.active_connections[session_id] = websocket
 
     def disconnect(self, session_id: str):
@@ -223,15 +194,6 @@ async def process_chat(student_id: str, session_id: str, message: str,
     system_prompt = agent.build_system_prompt(ctx_text, level)
     if hasattr(agent, 'get_level_prompt'):
         system_prompt += f"\n\n{agent.get_level_prompt(level)}"
-
-    if _needs_clarification_mode(message, topic):
-        system_prompt += (
-            "\n\nAFKLARINGSMODE:\n"
-            "- Elevens besked er kort, generel eller en hilsen.\n"
-            "- Start med ét konkret afklaringsspørgsmål, ikke en bred forklaring.\n"
-            "- Giv 2-4 tydelige valg eller et mini-eksempel, så eleven let kan svare.\n"
-            "- Undgå vage formuleringer som 'hvad tænker du?' eller 'hvad vil du gerne vide?'."
-        )
 
     # Build user prompt
     user_prompt = f"""Elevens spørgsmål: {message}
@@ -334,26 +296,23 @@ async def root():
 async def health_check():
     """Check system health."""
     llm = services["llm"]
-    llm_ok = await llm.check_connection()
-    models = await llm.list_models() if llm_ok else []
-    active_model = llm.model
-
-    if llm.backend == "lmstudio" and models:
-        active_model = llm.model if llm.model in models else models[0]
+    ollama_ok = await llm.check_connection()
+    models = await llm.list_models() if ollama_ok else []
 
     return {
         "status": "healthy",
         "database": "connected",
         "llm_backend": llm.backend,
         "llm_backend_name": llm.backend_name,
-        "ollama": "connected" if (llm.backend == "ollama" and llm_ok) else ("n/a" if llm.backend != "ollama" else "disconnected"),
-        "lmstudio": "connected" if (llm.backend == "lmstudio" and llm_ok) else ("n/a" if llm.backend != "lmstudio" else "disconnected"),
-        "anthropic": "connected" if (llm.backend == "anthropic" and llm_ok) else (
+        "ollama": "connected" if (llm.backend == "ollama" and ollama_ok) else (
+            "n/a" if llm.backend == "anthropic" else "disconnected"
+        ),
+        "anthropic": "connected" if (llm.backend == "anthropic" and ollama_ok) else (
             "n/a" if llm.backend == "ollama" else "disconnected"
         ),
         "ollama_host": llm.host,
         "available_models": models,
-        "default_model": active_model,
+        "default_model": llm.model,
         "agents": list(services["agents"].agents.keys()),
     }
 
@@ -507,6 +466,16 @@ async def get_student(student_id: str):
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
     return student
+
+
+class StudentUpdate(BaseModel):
+    name: Optional[str] = None
+    hf_year: Optional[int] = None
+    target_program: Optional[str] = None
+    preferred_modality: Optional[str] = None
+    preferred_depth: Optional[str] = None
+    preferred_language: Optional[str] = None
+    pace: Optional[float] = None
 
 
 @app.put("/api/v1/students/{student_id}")

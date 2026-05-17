@@ -143,8 +143,6 @@ export default function Settings() {
                       step="0.1"
                       value={student.pace}
                       onChange={(e) => setStudent({ ...student, pace: parseFloat(e.target.value) })}
-                      aria-label="Pace"
-                      title="Pace"
                       className="flex-1"
                     />
                     <span className="text-sm font-mono w-10 text-right">
@@ -254,20 +252,12 @@ export default function Settings() {
                 <div className="flex items-center gap-3 p-3 rounded-lg bg-background/50 border border-border/50">
                   <CircleDot
                     className={`w-5 h-5 ${
-                      (health.llm_backend === "anthropic" ? health.anthropic : health.ollama) === "connected"
-                        ? "text-emerald-500"
-                        : "text-red-500"
+                      health.ollama === "connected" ? "text-emerald-500" : "text-red-500"
                     }`}
                   />
                   <div>
-                    <p className="text-sm font-medium">{health.llm_backend_name || "LLM"}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {health.llm_backend === "anthropic"
-                        ? health.anthropic
-                        : health.llm_backend === "lmstudio"
-                        ? health.lmstudio
-                        : health.ollama}
-                    </p>
+                    <p className="text-sm font-medium">Ollama</p>
+                    <p className="text-xs text-muted-foreground">{health.ollama}</p>
                   </div>
                 </div>
 

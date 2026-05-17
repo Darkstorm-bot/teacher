@@ -1,9 +1,8 @@
-"""LLM Integration — Unified client supporting Anthropic Claude, LM Studio, and Ollama.
+"""LLM Integration — Unified client supporting Anthropic Claude and Ollama.
 
 Priority order:
-    1. If LMSTUDIO_HOST is set → use LM Studio's OpenAI-compatible endpoint
-    2. If ANTHROPIC_API_KEY is set → use Claude (claude-sonnet-4-20250514 by default)
-    3. Otherwise → use Ollama at OLLAMA_HOST
+  1. If ANTHROPIC_API_KEY is set → use Claude (claude-sonnet-4-20250514 by default)
+  2. Otherwise → use Ollama at OLLAMA_HOST
 
 The public API (generate / generate_stream / chat / chat_stream) is identical
 for both backends so the rest of the codebase needs zero changes.
@@ -12,10 +11,10 @@ import os
 import json
 import httpx
 from typing import AsyncGenerator, Optional, List, Dict
-from api.core.config import OLLAMA_HOST, DEFAULT_MODEL, LMSTUDIO_HOST
+from api.core.config import OLLAMA_HOST, DEFAULT_MODEL
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+ANTHROPIC_MODEL   = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 
 
@@ -56,153 +55,24 @@ class LLMClient:
     """Unified LLM client. Auto-selects Anthropic or Ollama at instantiation time."""
 
     def __init__(self, host: str = None, model: str = None):
-        configured_host = host or (LMSTUDIO_HOST if LMSTUDIO_HOST else OLLAMA_HOST)
-        self.host = configured_host.rstrip("/")
-        self._lmstudio_host = LMSTUDIO_HOST.rstrip("/") if LMSTUDIO_HOST else ""
-        self.model = model or DEFAULT_MODEL
-        if LMSTUDIO_HOST:
-            self.backend = "lmstudio"
-        elif _using_anthropic():
-            self.backend = "anthropic"
-        else:
-            self.backend = "ollama"
-        self.client = httpx.AsyncClient(timeout=180.0)
+        self.host    = host or OLLAMA_HOST
+        self.model   = model or DEFAULT_MODEL
+        self.backend = "anthropic" if _using_anthropic() else "ollama"
+        self.client  = httpx.AsyncClient(timeout=180.0)
 
     @property
     def backend_name(self) -> str:
         if self.backend == "anthropic":
             return f"Claude ({ANTHROPIC_MODEL})"
-        if self.backend == "lmstudio":
-            return f"LM Studio ({self.model}) @ {self._lmstudio_api_base()}"
         return f"Ollama ({self.model})"
 
-    def _lmstudio_api_base(self) -> str:
-        host = self._lmstudio_host or self.host
-        if host.endswith("/v1"):
-            return host
-        return f"{host}/v1"
-
-    def _lmstudio_messages(self, prompt: str, system: Optional[str] = None,
-                           messages: Optional[List[Dict]] = None) -> List[Dict]:
-        if messages:
-            payload_messages = [m for m in messages if m.get("role") in ("user", "assistant", "system")]
-        else:
-            payload_messages = [{"role": "user", "content": prompt}]
-
-        if system:
-            return [{"role": "system", "content": system}, *payload_messages]
-        return payload_messages
-
-    async def _resolve_lmstudio_model(self) -> str:
-        models = await self.list_models()
-        if models:
-            if self.model not in models:
-                self.model = models[0]
-        return self.model
-
-    async def _lmstudio_generate(self, prompt: str, system: Optional[str],
-                                 temperature: float, max_tokens: int) -> str:
-        await self._resolve_lmstudio_model()
-        payload: dict = {
-            "model": self.model,
-            "messages": self._lmstudio_messages(prompt, system),
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": False,
-        }
-        try:
-            resp = await self.client.post(f"{self._lmstudio_api_base()}/chat/completions", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("choices", [{}])[0].get("message", {}).get("content", "")
-        except Exception as e:
-            return f"[LM Studio fejl: {e}]"
-
-    async def _lmstudio_stream(self, prompt: str, system: Optional[str],
-                               temperature: float, max_tokens: int):
-        await self._resolve_lmstudio_model()
-        payload: dict = {
-            "model": self.model,
-            "messages": self._lmstudio_messages(prompt, system),
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": True,
-        }
-        try:
-            async with self.client.stream("POST", f"{self._lmstudio_api_base()}/chat/completions", json=payload) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line.strip():
-                        continue
-                    if line.startswith("data: "):
-                        raw = line[6:]
-                        if raw.strip() == "[DONE]":
-                            break
-                        try:
-                            data = json.loads(raw)
-                            choice = data.get("choices", [{}])[0]
-                            delta = choice.get("delta", {})
-                            if "content" in delta:
-                                yield delta["content"]
-                        except json.JSONDecodeError:
-                            continue
-        except Exception as e:
-            yield f"[LM Studio fejl: {e}]"
-
-    async def _lmstudio_chat(self, messages, temperature, max_tokens) -> str:
-        await self._resolve_lmstudio_model()
-        payload = {
-            "model": self.model,
-            "messages": self._lmstudio_messages("", None, messages),
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": False,
-        }
-        try:
-            resp = await self.client.post(f"{self._lmstudio_api_base()}/chat/completions", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("choices", [{}])[0].get("message", {}).get("content", "")
-        except Exception as e:
-            return f"[LM Studio chat fejl: {e}]"
-
-    async def _lmstudio_chat_stream(self, messages, temperature, max_tokens):
-        await self._resolve_lmstudio_model()
-        payload = {
-            "model": self.model,
-            "messages": self._lmstudio_messages("", None, messages),
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": True,
-        }
-        try:
-            async with self.client.stream("POST", f"{self._lmstudio_api_base()}/chat/completions", json=payload) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line.strip():
-                        continue
-                    if line.startswith("data: "):
-                        raw = line[6:]
-                        if raw.strip() == "[DONE]":
-                            break
-                        try:
-                            data = json.loads(raw)
-                            choice = data.get("choices", [{}])[0]
-                            delta = choice.get("delta", {})
-                            if "content" in delta:
-                                yield delta["content"]
-                        except json.JSONDecodeError:
-                            continue
-        except Exception as e:
-            yield f"[LM Studio fejl: {e}]"
+    # ─ generate ─────────────────────────────────────────────────────────────
 
     async def generate(self, prompt: str, system: Optional[str] = None,
                        temperature: float = 0.7, max_tokens: int = 2048,
                        stream: bool = False) -> str:
         if self.backend == "anthropic":
             return await self._anthropic_generate(prompt, system, temperature, max_tokens)
-        if self.backend == "lmstudio":
-            return await self._lmstudio_generate(prompt, system, temperature, max_tokens)
         return await self._ollama_generate(prompt, system, temperature, max_tokens)
 
     async def _anthropic_generate(self, prompt, system, temperature, max_tokens) -> str:
@@ -228,14 +98,13 @@ class LLMClient:
         except Exception as e:
             return f"[Ollama fejl: {e}. Sørg for at Ollama kører på {self.host}]"
 
+    # ─ generate_stream ───────────────────────────────────────────────────────
+
     async def generate_stream(self, prompt: str, system: Optional[str] = None,
-                              temperature: float = 0.7,
-                              max_tokens: int = 2048) -> AsyncGenerator[str, None]:
+                               temperature: float = 0.7,
+                               max_tokens: int = 2048) -> AsyncGenerator[str, None]:
         if self.backend == "anthropic":
             async for chunk in self._anthropic_stream(prompt, system, temperature, max_tokens):
-                yield chunk
-        elif self.backend == "lmstudio":
-            async for chunk in self._lmstudio_stream(prompt, system, temperature, max_tokens):
                 yield chunk
         else:
             async for chunk in self._ollama_stream(prompt, system, temperature, max_tokens):
@@ -244,7 +113,8 @@ class LLMClient:
     async def _anthropic_stream(self, prompt, system, temperature, max_tokens):
         payload = _build_anthropic_payload(prompt, system, temperature, max_tokens, True)
         try:
-            async with self.client.stream("POST", ANTHROPIC_API_URL, headers=_anthropic_headers(), json=payload) as resp:
+            async with self.client.stream("POST", ANTHROPIC_API_URL,
+                                           headers=_anthropic_headers(), json=payload) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
                     if not line.startswith("data: "):
@@ -287,12 +157,12 @@ class LLMClient:
         except Exception as e:
             yield f"[Ollama fejl: {e}]"
 
+    # ─ chat (multi-turn) ─────────────────────────────────────────────────────
+
     async def chat(self, messages: List[Dict], temperature: float = 0.7,
                    max_tokens: int = 2048, system: Optional[str] = None) -> str:
         if self.backend == "anthropic":
             return await self._anthropic_chat(messages, system, temperature, max_tokens)
-        if self.backend == "lmstudio":
-            return await self._lmstudio_chat(messages, temperature, max_tokens)
         return await self._ollama_chat(messages, temperature, max_tokens)
 
     async def _anthropic_chat(self, messages, system, temperature, max_tokens) -> str:
@@ -345,9 +215,6 @@ class LLMClient:
                             continue
             except Exception as e:
                 yield f"[Anthropic stream fejl: {e}]"
-        elif self.backend == "lmstudio":
-            async for chunk in self._lmstudio_chat_stream(messages, temperature, max_tokens):
-                yield chunk
         else:
             payload = {
                 "model": self.model, "messages": messages, "stream": True,
@@ -370,6 +237,8 @@ class LLMClient:
             except Exception as e:
                 yield f"[Ollama fejl: {e}]"
 
+    # ─ health ────────────────────────────────────────────────────────────────
+
     async def check_connection(self) -> bool:
         if self.backend == "anthropic":
             try:
@@ -382,12 +251,6 @@ class LLMClient:
                 return resp.status_code in (200, 400)
             except Exception:
                 return False
-        if self.backend == "lmstudio":
-            try:
-                resp = await self.client.get(f"{self._lmstudio_api_base()}/models", timeout=5.0)
-                return resp.status_code == 200
-            except Exception:
-                return False
         try:
             resp = await self.client.get(f"{self.host}/api/tags", timeout=5.0)
             return resp.status_code == 200
@@ -397,19 +260,6 @@ class LLMClient:
     async def list_models(self) -> List[str]:
         if self.backend == "anthropic":
             return [ANTHROPIC_MODEL, "claude-opus-4-20250514", "claude-haiku-4-5-20251001"]
-        if self.backend == "lmstudio":
-            try:
-                resp = await self.client.get(f"{self._lmstudio_api_base()}/models", timeout=5.0)
-                resp.raise_for_status()
-                data = resp.json().get("data", [])
-                models = []
-                for item in data:
-                    model_id = item.get("id") or item.get("name")
-                    if model_id:
-                        models.append(model_id)
-                return models
-            except Exception:
-                return []
         try:
             resp = await self.client.get(f"{self.host}/api/tags")
             return [m["name"] for m in resp.json().get("models", [])]
@@ -417,4 +267,5 @@ class LLMClient:
             return []
 
 
+# Backwards-compat alias used by peer_review / panel_discussion
 OllamaClient = LLMClient

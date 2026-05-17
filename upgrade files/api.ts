@@ -150,7 +150,7 @@ class ApiService {
   async searchMemory(query: string, wing?: string, agent?: string, topic?: string) {
     const url = new URL(`${API_BASE}/api/v1/memory/search`);
     url.searchParams.set("query", query);
-    if (wing) url.searchParams.set("wing", wing);
+    if (wing)  url.searchParams.set("wing", wing);
     if (agent) url.searchParams.set("agent", agent);
     if (topic) url.searchParams.set("topic", topic);
     return this._fetch(url.toString());
@@ -164,6 +164,8 @@ class ApiService {
 }
 
 export const api = new ApiService();
+
+// ── WebSocket service with auto-reconnect ─────────────────────────────────────
 
 export class WebSocketService {
   private ws: WebSocket | null = null;
@@ -190,22 +192,11 @@ export class WebSocketService {
       this.reconnectTimer = null;
     }
 
-    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
-      return;
-    }
-
     const wsUrl = API_BASE.replace(/^http/, "ws");
-    const socket = new WebSocket(`${wsUrl}/ws/chat`);
-    this.ws = socket;
+    this.ws = new WebSocket(`${wsUrl}/ws/chat`);
 
-    socket.onopen = () => {
-      if (this.ws !== socket) {
-        try { socket.close(); } catch {
-          /* ignore */
-        }
-        return;
-      }
-      this.reconnectDelay = 1000;
+    this.ws.onopen = () => {
+      this.reconnectDelay = 1000; // reset backoff
       const sid = this.pendingSession?.sessionId
         || this.sessionId
         || `sess_${Math.random().toString(36).slice(2, 10)}`;
@@ -214,26 +205,19 @@ export class WebSocketService {
       this.statusHandlers.forEach((h) => h(true));
     };
 
-    socket.onmessage = (event) => {
-      if (this.ws !== socket) return;
+    this.ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         this.messageHandlers.forEach((h) => h(data));
-      } catch {
-        /* ignore malformed frames */
-      }
+      } catch {/* ignore malformed frames */}
     };
 
-    socket.onclose = () => {
-      if (this.ws === socket) {
-        this.ws = null;
-      }
+    this.ws.onclose = () => {
       this.statusHandlers.forEach((h) => h(false));
       if (this.shouldReconnect) this._scheduleReconnect();
     };
 
-    socket.onerror = () => {
-      if (this.ws !== socket) return;
+    this.ws.onerror = () => {
       this.statusHandlers.forEach((h) => h(false));
     };
   }
@@ -274,24 +258,8 @@ export class WebSocketService {
   disconnect() {
     this.shouldReconnect = false;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    const socket = this.ws;
+    this.ws?.close();
     this.ws = null;
-    if (!socket) return;
-
-    if (socket.readyState === WebSocket.CONNECTING) {
-      socket.onopen = () => {
-        try {
-          socket.close();
-        } catch {
-          /* ignore */
-        }
-      };
-      return;
-    }
-
-    if (socket.readyState === WebSocket.OPEN) {
-      socket.close();
-    }
   }
 
   getSessionId() { return this.sessionId; }

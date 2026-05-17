@@ -5,9 +5,34 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 
+
+def _load_dotenv_file(path: Path) -> None:
+    """Load simple KEY=VALUE pairs from .env without adding a dependency."""
+    if not path.exists():
+        return
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv_file(BASE_DIR / ".env")
+
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen2.5:14b-instruct-q4_K_M")
 SEARXNG_URL = os.getenv("SEARXNG_URL", "http://localhost:8080")
+LMSTUDIO_HOST = os.getenv("LMSTUDIO_HOST", "")
+"""
+Optional: set `LMSTUDIO_HOST` to point to an LMStudio instance (e.g. http://localhost:8081).
+If present, the LLM client will prefer LMStudio over other local backends.
+"""
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DATA_DIR}/hf_agent.db")
 PALACE_PATH = DATA_DIR / "mempalace"
 CHROMA_PATH = DATA_DIR / "chromadb"
